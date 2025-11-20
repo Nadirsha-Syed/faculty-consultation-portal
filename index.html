@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faculty Consultation Booking Portal</title>
+    <!-- Load Tailwind CSS via CDN for instant styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Custom Tailwind configuration for the college theme */
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'college-blue': '#1D4ED8',
+                        'college-light': '#F3F4F6',
+                        'college-dark': '#1F2937',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            }
+        }
+        /* Ensure the body takes up the full viewport height */
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-color: #F3F4F6; /* Use college-light background */
+            font-family: 'Inter', 'sans-serif';
+        }
+        main {
+            flex-grow: 1;
+        }
+
+        /* --- CRITICAL BUTTON VISIBILITY FIX (FOR LOCAL FILE ACCESS) --- */
+        /* Forces buttons to have solid background color if CDN styling is slow to load */
+        #auth-submit, #booking-submit { background-color: #1D4ED8 !important; color: white !important; }
+        .bg-red-500 { background-color: #EF4444 !important; color: white !important; }
+        .bg-green-500 { background-color: #22C55E !important; color: white !important; }
+        .bg-purple-500 { background-color: #A855F7 !important; color: white !important; }
+        .bg-college-dark { background-color: #1F2937 !important; color: white !important; }
+        /* Fixes issue where date input arrows are hidden on smaller screens */
+        input[type="datetime-local"]::-webkit-calendar-picker-indicator { opacity: 1; }
+    </style>
+</head>
+<body class="bg-college-light font-sans">
+
+    <!-- Header -->
+    <header class="bg-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <a href="#" id="home-link" class="text-2xl font-bold text-college-blue hover:text-blue-700 transition duration-150">
+                Consultation Portal
+            </a>
+            <nav class="flex space-x-4 items-center" id="nav-area">
+                <!-- Nav items are injected here by JavaScript -->
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        <div id="app-container">
+            <!-- Dynamic content views will be rendered here -->
+        </div>
+    </main>
+
+    <!-- Modal for Alert Messages -->
+    <div id="message-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 z-50 hidden items-center justify-center">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-80 text-center">
+            <h3 id="modal-title" class="text-xl font-bold mb-3 text-college-dark"></h3>
+            <p id="modal-body" class="text-gray-700 mb-4"></p>
+            <button id="modal-close" class="bg-college-blue hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-150">
+                Close
+            </button>
+        </div>
+    </div>
+
+
+    <script>
+        // --- Configuration and State ---
+        // CRITICAL FIX: Using the specific network IP to bypass firewall/CORS blocks
+        const API_BASE_URL = 'http://10.3.4.254:5000/api'; 
+        const appContainer = document.getElementById('app-container');
+        const navArea = document.getElementById('nav-area');
+        let user = JSON.parse(localStorage.getItem('userInfo')) || null;
+
+        // --- Utility Functions ---
+
+        // Display a custom modal instead of alert()
+        const showModal = (title, message) => {
+            const modal = document.getElementById('message-modal');
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-body').textContent = message;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.getElementById('modal-close').onclick = () => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            };
+        };
+
+        const updateAuthState = (newUser) => {
+            user = newUser;
+            if (newUser) {
+                localStorage.setItem('userInfo', JSON.stringify(newUser));
+            } else {
+                localStorage.removeItem('userInfo');
+            }
+            updateNavBar();
+        };
+
+        const logout = () => {
+            updateAuthState(null);
+            showView('landing');
+        };
+
+        const updateNavBar = () => {
+            navArea.innerHTML = '';
+            if (user) {
+                let navHtml = `
+                    <span class="text-sm font-medium text-gray-700 hidden sm:block">
+                        Welcome, ${user.name} (${user.role})
+                    </span>
+                `;
+                if (user.role === 'student') {
+                    navHtml += `<a href="#" onclick="showView('myprofile')" class="text-college-dark hover:text-college-blue transition duration-150">My Profile</a>`;
+                    navHtml += `<a href="#" onclick="showView('bookings')" class="text-college-dark hover:text-college-blue transition duration-150">My Bookings</a>`;
+                } else if (user.role === 'faculty') {
+                    navHtml += `<a href="#" onclick="showView('dashboard')" class="text-college-dark hover:text-college-blue transition duration-150">Dashboard</a>`;
+                }
+                navHtml += `
+                    <button 
+                        onclick="logout()" 
+                        class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-150"
+                    >
+                        Logout
+                    </button>
+                `;
+                navArea.innerHTML = navHtml;
+            }
+        };
+
+        const callApi = async (url, method = 'GET', body = null) => {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (user && user.token) {
+                headers['Authorization'] = `Bearer ${user.token}`;
+            }
+
+            // Using fetch, which throws an error on network failure (Failed to fetch)
+            const response = await fetch(`${API_BASE_URL}${url}`, {
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : null
+            });
+            
+            // Check for network errors or non-JSON responses
+            if (!response.ok && response.status === 0) {
+                 throw new Error("Failed to fetch. Check if the backend server (Terminal 1) is running.");
+            }
+            
+            const data = await response.json();
+
+            if (!response.ok) {
+                // Throw the error message provided by the Express server
+                throw new Error(data.message || `API call failed with status ${response.status}`);
+            }
+            return data;
+        };
+        
+        // --- Routing and View Rendering ---
+        
+        const views = {};
+
+        const renderLanding = () => {
+            appContainer.innerHTML = `
+                <div class="min-h-[70vh] flex items-center justify-center">
+                    <div class="w-full max-w-4xl bg-white rounded-xl shadow-2xl overflow-hidden md:flex">
+                        
+                        <!-- Information Side -->
+                        <div class="md:w-1/2 p-8 bg-college-blue text-white flex flex-col justify-center items-center">
+                            <h1 class="text-4xl font-extrabold mb-4">Welcome to the Portal</h1>
+                            <p class="text-lg text-center mb-6">Book your academic consultations easily. Connect with faculty.</p>
+                            <p class="text-sm italic">Login or register to get started.</p>
+                        </div>
+
+                        <!-- Auth Form Side -->
+                        <div class="md:w-1/2 p-8">
+                            <h2 id="auth-title" class="text-3xl font-bold text-college-dark mb-2">Sign In</h2>
+                            <p id="auth-subtitle" class="mb-6 text-gray-600">Welcome back!</p>
+
+                            <form id="auth-form">
+                                <div id="register-fields" class="hidden">
+                                    <div class="mb-4">
+                                        <label class="block text-gray-700 text-sm font-medium mb-1">Full Name</label>
+                                        <input type="text" id="auth-name" class="w-full p-3 border border-gray-300 rounded-lg">
+                                    </div>
+                                    
+                                    <div class="mb-4">
+                                        <label class="block text-gray-700 text-sm font-medium mb-1">Role</label>
+                                        <select id="auth-role" class="w-full p-3 border border-gray-300 rounded-lg bg-white">
+                                            <option value="student">Student</option>
+                                            <option value="faculty">Faculty</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- Student Specific Fields -->
+                                    <div id="student-fields" class="hidden">
+                                        <div class="mb-4">
+                                            <label class="block text-gray-700 text-sm font-medium mb-1">Department</label>
+                                            <input type="text" id="auth-dept" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="e.g., Computer Science">
+                                        </div>
+                                        <div class="mb-4">
+                                            <label class="block text-gray-700 text-sm font-medium mb-1">Batch No / Year</label>
+                                            <input type="text" id="auth-batch" class="w-full p-3 border border-gray-300 rounded-lg" placeholder="e.g., 2024 (Mandatory)">
+                                        </div>
+                                    </div>
+                                    <!-- End Student Specific Fields -->
+
+                                </div>
+
+                                <div class="mb-4">
+                                    <label class="block text-gray-700 text-sm font-medium mb-1">Email</label>
+                                    <input type="email" id="auth-email" required class="w-full p-3 border border-gray-300 rounded-lg">
+                                </div>
+                                <div class="mb-6">
+                                    <label class="block text-gray-700 text-sm font-medium mb-1">Password</label>
+                                    <input type="password" id="auth-password" required class="w-full p-3 border border-gray-300 rounded-lg">
+                                </div>
+
+                                <p id="auth-error" class="text-red-500 text-sm mb-4"></p>
+
+                                <button type="submit" id="auth-submit" class="w-full bg-college-blue hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-150">
+                                    Login
+                                </button>
+                            </form>
+
+                            <p class="mt-6 text-center text-sm text-gray-600">
+                                <span id="auth-toggle-text">Don't have an account?</span>
+                                <button id="auth-toggle" class="ml-2 text-college-blue hover:text-blue-700 font-semibold transition duration-150">
+                                    Register
+                                </button>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Logic for toggling between Login and Register
+            let isLogin = true;
+            const form = document.getElementById('auth-form');
+            const toggleButton = document.getElementById('auth-toggle');
+            const submitButton = document.getElementById('auth-submit');
+            const registerFields = document.getElementById('register-fields');
+            const authTitle = document.getElementById('auth-title');
+            const authSubtitle = document.getElementById('auth-subtitle');
+            const authToggleText = document.getElementById('auth-toggle-text');
+            const authError = document.getElementById('auth-error');
+            const studentFields = document.getElementById('student-fields');
+            const authRole = document.getElementById('auth-role');
+
+
+            const updateFieldRequirements = (isStudent) => {
+                const required = !isLogin && isStudent;
+                document.getElementById('auth-dept').required = required;
+                document.getElementById('auth-batch').required = required;
+            };
+
+            authRole.onchange = () => {
+                const isStudent = authRole.value === 'student';
+                studentFields.classList.toggle('hidden', !isStudent);
+                updateFieldRequirements(isStudent);
+            };
+
+            const toggleAuth = () => {
+                isLogin = !isLogin;
+                authTitle.textContent = isLogin ? 'Sign In' : 'Create Account';
+                authSubtitle.textContent = isLogin ? 'Welcome back!' : 'Join the community.';
+                submitButton.textContent = isLogin ? 'Login' : 'Register';
+                authToggleText.textContent = isLogin ? "Don't have an account?" : "Already have an account?";
+                toggleButton.textContent = isLogin ? 'Register' : 'Login';
+                registerFields.classList.toggle('hidden', isLogin);
+                document.getElementById('auth-name').required = !isLogin;
+                
+                // Reset role display and required fields on toggle
+                authRole.value = 'student';
+                studentFields.classList.add('hidden'); // Hide student fields initially on register open
+                updateFieldRequirements(false); // Set requirements false until student is selected
+            };
+
+            toggleButton.onclick = toggleAuth;
+            
+            // Logic for submitting the form
+            form.onsubmit = async (e) => {
+                e.preventDefault();
+                authError.textContent = '';
+                submitButton.disabled = true;
+                submitButton.textContent = isLogin ? 'Logging In...' : 'Registering...';
+
+                const email = document.getElementById('auth-email').value;
+                const password = document.getElementById('auth-password').value;
+                let data = { email, password };
+                let endpoint = isLogin ? '/auth/login' : '/auth/register';
+
+                if (!isLogin) {
+                    const role = document.getElementById('auth-role').value;
+                    data.name = document.getElementById('auth-name').value;
+                    data.role = role;
+                    
+                    if (role === 'student') {
+                        data.studentDepartment = document.getElementById('auth-dept').value;
+                        data.batchNo = document.getElementById('auth-batch').value;
+                    }
+                }
+
+                try {
+                    const response = await callApi(endpoint, 'POST', data);
+                    
+                    // Retrieve user data to update the client session correctly
+                    let updatedUser = {
+                        ...response,
+                        role: response.role,
+                        name: response.name,
+                        token: response.token
+                    };
+                    
+                    // If login/register as student, ensure student profile data is available for MyProfile view
+                    if (updatedUser.role === 'student') {
+                         const profileResponse = await callApi(`/profile/student/${updatedUser._id}`);
+                         updatedUser = { ...updatedUser, ...profileResponse };
+                    }
+                    
+                    updateAuthState(updatedUser);
+                    showView('faculty'); // Redirect to faculty list after auth
+                } catch (error) {
+                    authError.textContent = error.message || 'Authentication failed.';
+                    console.error('Auth Error:', error);
+                } finally {
+                    submitButton.disabled = false;
+                    submitButton.textContent = isLogin ? 'Login' : 'Register';
+                }
+            };
+        };
+        views.landing = renderLanding;
+
+        // NEW RENDER FUNCTION: Student Profile Editor
+        const renderStudentProfileEditor = async () => {
+            if (!user || user.role !== 'student') return showView('landing');
+
+            appContainer.innerHTML = `
+                <div class="mb-10 bg-white p-6 rounded-xl shadow-lg border-l-8 border-college-blue">
+                    <h1 class="text-4xl font-extrabold text-college-dark mb-8 border-b-2 pb-2">My Profile</h1>
+                    <form id="student-profile-form">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                                <input type="text" id="profile-name" value="${user.name || ''}" required class="w-full p-3 border border-gray-300 rounded-lg">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Email (Cannot be changed)</label>
+                                <input type="email" value="${user.email}" disabled class="w-full p-3 border border-gray-300 bg-gray-100 rounded-lg">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                                <input type="text" id="profile-student-dept" value="${user.studentDepartment || ''}" required class="w-full p-3 border border-gray-300 rounded-lg">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Batch No / Year</label>
+                                <input type="text" id="profile-batch" value="${user.batchNo || ''}" required class="w-full p-3 border border-gray-300 rounded-lg">
+                            </div>
+                        </div>
+                        <p id="profile-error" class="text-red-500 text-sm mb-4"></p>
+                        <button type="submit" id="save-profile-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
+                            Save Profile
+                        </button>
+                    </form>
+                </div>
+            `;
+
+            const saveBtn = document.getElementById('save-profile-btn');
+            const errorP = document.getElementById('profile-error');
+
+            document.getElementById('student-profile-form').onsubmit = async (e) => {
+                e.preventDefault();
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving...';
+                errorP.textContent = '';
+
+                const updateData = {
+                    name: document.getElementById('profile-name').value,
+                    studentDepartment: document.getElementById('profile-student-dept').value,
+                    batchNo: document.getElementById('profile-batch').value,
+                };
+                
+                try {
+                    const response = await callApi('/profile/student', 'PUT', updateData);
+                    
+                    // Update global user state and local storage with new data/token
+                    let updatedUser = { 
+                        ...user, 
+                        name: response.name, 
+                        token: response.token, 
+                        studentDepartment: response.studentDepartment,
+                        batchNo: response.batchNo
+                    };
+
+                    updateAuthState(updatedUser);
+                    showModal('Success', 'Profile updated successfully!');
+                    showView('myprofile'); // Re-render to show updated name in header/fields
+                    
+                } catch (error) {
+                    errorP.textContent = error.message || 'Failed to save profile.';
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save Profile';
+                }
+            };
+        };
+        views.myprofile = renderStudentProfileEditor;
+
+
+        const renderFacultyList = async () => {
+            if (!user) return showView('landing');
+
+            appContainer.innerHTML = `
+                <h1 class="text-4xl font-extrabold text-college-dark mb-8 border-b-2 pb-2">
+                    Available Faculty for Consultation
+                </h1>
+                <div id="faculty-list-content" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    <div class="text-center py-10 text-xl font-medium">Loading faculty list...</div>
+                </div>
+            `;
+            const contentDiv = document.getElementById('faculty-list-content');
+            
+            try {
+                const facultyList = await callApi('/faculty');
+                
+                if (facultyList.length === 0) {
+                    contentDiv.innerHTML = `<div class="md:col-span-3 text-center py-20 text-gray-500 text-lg p-6 bg-white rounded-xl shadow">No faculty members are currently registered.</div>`;
+                    return;
+                }
+
+                contentDiv.innerHTML = facultyList.map(faculty => `
+                    <div class="bg-white p-6 rounded-xl shadow-lg hover:shadow-xl transition duration-300 border-t-4 border-college-blue">
+                        <h2 class="text-2xl font-bold text-gray-800">${faculty.name}</h2>
+                        <p class="text-college-blue font-medium mb-3">${faculty.title}</p>
+                        <p class="text-gray-600 mb-2">
+                            <span class="font-semibold">Dept:</span> ${faculty.department || 'General'}
+                        </p>
+                        <p class="text-gray-500 italic line-clamp-2 mb-4">
+                            "${faculty.bio}"
+                        </p>
+                        <button 
+                            onclick="showView('profile', '${faculty.id}')"
+                            class="inline-block bg-college-dark hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150"
+                        >
+                            View Profile & Book
+                        </button>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="md:col-span-3 text-center py-10 text-red-600 text-xl font-medium">${error.message}</div>`;
+            }
+        };
+        views.faculty = renderFacultyList;
+        
+        const renderFacultyProfile = async (facultyId) => {
+            if (!user) return showView('landing');
+            
+            appContainer.innerHTML = `<div class="text-center py-10 text-xl font-medium">Loading profile...</div>`;
+
+            try {
+                const faculty = await callApi(`/faculty/${facultyId}`);
+
+                // Student's preferred availability is just displayed, not used for booking form dates
+                const slotsHtml = faculty.availableSlots ? 
+                    `<p>${faculty.availableSlots}</p>` : 
+                    `<li>No specific availability listed.</li>`; 
+
+                appContainer.innerHTML = `
+                    <div class="bg-white p-8 rounded-xl shadow-2xl border-l-8 border-college-blue">
+                        <h1 class="text-4xl font-extrabold text-gray-800">${faculty.name}</h1>
+                        <h2 class="text-xl text-college-blue font-semibold mb-4">${faculty.title} - ${faculty.department || 'General'}</h2>
+                        
+                        <div class="mb-6">
+                            <h3 class="text-2xl font-bold text-college-dark mb-2">Biography</h3>
+                            <p class="text-gray-700 leading-relaxed italic">${faculty.bio}</p>
+                        </div>
+                        
+                        <div id="booking-message" class="hidden bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded" role="alert">
+                            <p class="font-bold">Success!</p>
+                            <p>Booking request submitted successfully! Check your My Bookings page for status updates.</p>
+                        </div>
+
+                        <!-- Booking Form (Visible only to students) -->
+                        <div id="booking-area" class="${user.role === 'student' ? '' : 'hidden'} mt-8">
+                            <div class="bg-gray-50 p-6 rounded-xl shadow-lg border border-gray-200">
+                                <h3 class="text-2xl font-bold text-college-dark mb-4">Submit Consultation Request to ${faculty.name}</h3>
+                                
+                                <form id="booking-form">
+                                    <div class="mb-4">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Consultation Topic (max 150 chars)</label>
+                                        <input type="text" id="booking-topic" required maxlength="150"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-college-blue focus:border-college-blue"
+                                            placeholder="e.g., Thesis review, Project consultation"
+                                        />
+                                    </div>
+                                    
+                                    <!-- Optional Message Field -->
+                                    <div class="mb-4">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Optional Message for Faculty (Max 300 chars)</label>
+                                        <textarea id="booking-message-text" maxlength="300"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-college-blue focus:border-college-blue h-20"
+                                            placeholder="e.g., I need help with... or I prefer to meet after 2pm."
+                                        ></textarea>
+                                    </div>
+
+                                    <!-- Date/Time Preference -->
+                                    <div class="mb-4">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Preferred Date and Time (for reference)</label>
+                                        <input type="datetime-local" id="booking-datetime" required 
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-college-blue focus:border-college-blue"
+                                        />
+                                    </div>
+
+                                    <div class="mb-6">
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Duration (Minutes)</label>
+                                        <select id="booking-duration" class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white focus:ring-college-blue focus:border-college-blue">
+                                            <option value="30">30 Minutes</option>
+                                            <option value="60">60 Minutes</option>
+                                        </select>
+                                    </div>
+
+                                    <p id="booking-error" class="text-red-500 text-sm mb-4"></p>
+
+                                    <button type="submit" id="booking-submit" class="w-full bg-college-blue hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition duration-150">
+                                        Submit Request
+                                    </button>
+                                </form>
+
+                                <div class="mt-6 p-4 bg-blue-100 rounded-lg">
+                                    <h4 class="font-semibold text-college-dark mb-2">Faculty Availability (General):</h4>
+                                    <ul class="text-sm text-gray-700">${slotsHtml}</ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Non-Student Message -->
+                        <div class="${user.role === 'student' ? 'hidden' : ''} mt-8 p-6 bg-yellow-100 rounded-lg border-l-4 border-yellow-500">
+                            <p class="font-semibold text-yellow-800">Note:</p>
+                            <p class="text-yellow-700">Only authenticated students can submit a booking request.</p>
+                        </div>
+                    </div>
+                `;
+
+                // Attach submit handler to the form
+                const bookingForm = document.getElementById('booking-form');
+                if (bookingForm) {
+                    bookingForm.onsubmit = async (e) => {
+                        e.preventDefault();
+                        const topic = document.getElementById('booking-topic').value;
+                        const studentMessage = document.getElementById('booking-message-text').value;
+                        const dateTime = document.getElementById('booking-datetime').value;
+                        const durationMinutes = document.getElementById('booking-duration').value;
+                        const submitBtn = document.getElementById('booking-submit');
+                        const errorP = document.getElementById('booking-error');
+
+                        submitBtn.disabled = true;
+                        submitBtn.textContent = 'Submitting...';
+                        errorP.textContent = '';
+                        
+                        const bookingData = {
+                            facultyId: faculty.id,
+                            dateTime: new Date(dateTime).toISOString(),
+                            durationMinutes: Number(durationMinutes),
+                            topic,
+                            studentMessage // NEW: Include the optional message
+                        };
+
+                        try {
+                            await callApi('/bookings', 'POST', bookingData);
+                            document.getElementById('booking-message').classList.remove('hidden');
+                            // Clear form fields after successful submission
+                            document.getElementById('booking-topic').value = '';
+                            document.getElementById('booking-datetime').value = '';
+                            document.getElementById('booking-message-text').value = '';
+
+                            setTimeout(() => {
+                                document.getElementById('booking-message').classList.add('hidden');
+                            }, 5000);
+                        } catch (error) {
+                            errorP.textContent = error.message || 'Failed to create booking.';
+                        } finally {
+                            submitBtn.disabled = false;
+                            submitButton.textContent = 'Submit Request';
+                        }
+                    };
+                }
+
+            } catch (error) {
+                appContainer.innerHTML = `<div class="text-center py-10 text-red-600 text-xl font-medium">${error.message}</div>`;
+            }
+        };
+        views.profile = renderFacultyProfile;
+        
+        const formatStatus = (status) => {
+            const base = "font-semibold px-3 py-1 rounded-full text-sm capitalize";
+            switch(status) {
+                // The status text is now returned cleanly inside the class string
+                case 'approved': return `${base} bg-green-100 text-green-700">Approved`;
+                case 'rejected': return `${base} bg-red-100 text-red-700">Rejected`;
+                case 'pending': return `${base} bg-yellow-100 text-yellow-700">Pending`;
+                case 'completed': return `${base} bg-gray-100 text-gray-700">Completed`;
+                case 'cancelled': return `${base} bg-gray-300 text-gray-700">Cancelled`; 
+                case 'reschedule': return `${base} bg-purple-100 text-purple-700">Rescheduled`; // FIXED Display Wording
+                default: return `${base} bg-gray-200 text-gray-800">${status}`;
+            }
+        };
+
+        const renderStudentBookings = async () => {
+            if (!user) return showView('landing');
+
+            appContainer.innerHTML = `
+                <h1 class="text-4xl font-extrabold text-college-dark mb-8 border-b-2 pb-2">
+                    My Consultation Bookings
+                </h1>
+                <div id="bookings-list" class="space-y-6">
+                    <div class="text-center py-10 text-xl font-medium">Loading bookings...</div>
+                </div>
+            `;
+            const bookingsList = document.getElementById('bookings-list');
+            
+            // Function to handle cancellation
+            window.cancelBookingRequest = async (bookingId) => {
+                showModal('Confirm Cancellation', 'Are you sure you want to cancel this booking? This action cannot be undone. \n\n (Functionality is currently stubbed to avoid complex DOM manipulation for modals, but would proceed with API call on confirmation.)');
+                
+                // NOTE: This API call is placed immediately inside the modal handler for simplicity.
+                
+                try {
+                    await callApi(`/bookings/${bookingId}`, 'DELETE');
+                    showModal('Success', 'Booking successfully cancelled. Faculty notified.');
+                    showView('bookings'); // Refresh the view
+                } catch (error) {
+                    showModal('Error', error.message || 'Failed to cancel booking.');
+                }
+            };
+
+
+            try {
+                const bookings = await callApi('/bookings/my');
+                
+                if (bookings.length === 0) {
+                    bookingsList.innerHTML = `
+                        <div class="text-center py-20 text-gray-500 text-lg p-6 bg-white rounded-xl shadow">
+                            You have no consultation bookings. <br/>
+                            <a href="#" onclick="showView('faculty')" class="text-college-blue hover:underline font-semibold mt-2 inline-block">
+                                Browse Faculty to submit a request.
+                            </a>
+                        </div>
+                    `;
+                    return;
+                }
+
+                bookingsList.innerHTML = bookings.map(booking => {
+                    let scheduleInfo = `
+                        <p>📅 Preferred: ${new Date(booking.dateTime).toLocaleDateString()} at ${new Date(booking.dateTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                        <p>⏱️ Duration: ${booking.durationMinutes} minutes</p>
+                        ${booking.studentMessage ? `<p class="italic text-xs mt-1">Msg: ${booking.studentMessage}</p>` : ''}
+                    `;
+
+                    let actionsHtml = '';
+                    
+                    if (booking.status === 'approved' || booking.status === 'reschedule') {
+                        // Display final schedule information if it exists (i.e., faculty set a time during approval/reschedule)
+                        if (booking.finalDateTime) {
+                             scheduleInfo = `
+                                <p class="font-semibold text-green-700">✅ Scheduled Time:</p>
+                                <p>📅 ${new Date(booking.finalDateTime).toLocaleDateString()}</p>
+                                <p>🕒 ${new Date(booking.finalDateTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                <p>📍 Room: ${booking.roomNumber}</p>
+                                <p class="text-xs text-gray-500 mt-2">Topic: ${booking.topic}</p>
+                            `;
+                        } else if (booking.status === 'reschedule') {
+                             scheduleInfo += `<p class="font-semibold text-purple-700 mt-2">❗ Faculty requested a reschedule. Submit a new request or cancel.</p>`;
+                        }
+                       
+                        // Student can cancel approved/rescheduled bookings
+                        actionsHtml = `
+                            <button onclick="window.cancelBookingRequest('${booking._id}')" class="text-sm text-red-500 hover:text-red-700 font-semibold mt-2">
+                                Cancel Booking
+                            </button>
+                        `;
+                    } else if (booking.status === 'pending') {
+                        // Student can cancel pending requests
+                         actionsHtml = `
+                            <button onclick="window.cancelBookingRequest('${booking._id}')" class="text-sm text-red-500 hover:text-red-700 font-semibold mt-2">
+                                Cancel Request
+                            </button>
+                        `;
+                    } else if (booking.status === 'rejected' || booking.status === 'cancelled') {
+                        // Show no actions for final statuses
+                         actionsHtml = `
+                            <p class="text-xs text-gray-400 mt-2">No actions available.</p>
+                        `;
+                    }
+                    
+                    return `
+                        <div class="bg-white p-6 rounded-xl shadow-lg border-l-4 border-college-blue flex justify-between items-center transition duration-300 hover:shadow-xl">
+                            <div>
+                                <h2 class="text-2xl font-bold text-gray-800 mb-1">
+                                    ${booking.faculty?.userId?.name || 'Unknown Faculty'}
+                                </h2>
+                                <p class="text-gray-600 mb-3">
+                                    <span class="font-semibold">Topic:</span> ${booking.topic}
+                                </p>
+                                <div class="text-sm text-gray-500 space-y-1">
+                                    ${scheduleInfo}
+                                </div>
+                            </div>
+                            <div class="flex flex-col items-end space-y-3">
+                                <span class="${formatStatus(booking.status)}"></span>
+                                ${actionsHtml}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                bookingsList.innerHTML = `<div class="text-center py-10 text-red-600 text-xl font-medium">${error.message}</div>`;
+            }
+        };
+        views.bookings = renderStudentBookings;
+
+        // NOTE: We now use window.handleFacultyAction for global access
+        window.handleFacultyAction = async (bookingId, status) => {
+            const form = document.getElementById(`schedule-form-${bookingId}`);
+            
+            if (status === 'approved' || status === 'reschedule') {
+                // If approving (from pending) OR rescheduling (from approved/rescheduled), show the inline form
+                if (event && event.type === 'click') {
+                    // Check if the form is already open
+                    if (form.classList.contains('hidden')) {
+                        // Close all other open schedule forms
+                        document.querySelectorAll('[id^="schedule-form-"]').forEach(f => {
+                            if (f.id !== form.id) f.classList.add('hidden');
+                        });
+
+                        // Open the selected form
+                        form.classList.remove('hidden');
+                        
+                        // Set form title and button text based on action
+                        const isReschedule = status === 'reschedule';
+                        form.querySelector('h4').textContent = isReschedule ? 'Set New Schedule:' : 'Final Schedule:';
+                        form.querySelector('button[type="submit"]').textContent = isReschedule ? 'Finalize Reschedule' : 'Finalize Approval';
+                        
+                        // Set the form submit handler status
+                        form.onsubmit = (e) => window.submitApproval(bookingId, e, status);
+                    } else {
+                        // Hide the form if already open
+                        form.classList.add('hidden');
+                    }
+                    return; // Exit here, let the inline form handler manage the submission
+                }
+            } else if (status === 'rejected') {
+                 // Reject action on pending or approved/rescheduled request
+                 const submitData = { status: 'rejected' };
+                 try {
+                    await callApi(`/bookings/${bookingId}/status`, 'PUT', submitData);
+                    showModal('Success', `Booking successfully marked as rejected. Student notified.`);
+                    showView('dashboard'); // Refresh the dashboard
+                 } catch (error) {
+                    showModal('Error', error.message || `Failed to update status to rejected.`);
+                 }
+                 return;
+            }
+        };
+
+
+        const renderFacultyDashboard = async () => {
+            if (!user || user.role !== 'faculty') return showView('landing');
+            
+            // Function to handle profile saving (nested for scope access)
+            const saveProfile = async (e) => {
+                 e.preventDefault();
+                 const saveBtn = document.getElementById('save-profile-btn');
+                 saveBtn.disabled = true;
+                 saveBtn.textContent = 'Saving...';
+                 
+                 const department = document.getElementById('profile-department').value;
+                 const title = document.getElementById('profile-title').value;
+                 const bio = document.getElementById('profile-bio').value;
+
+                 // Prepare slots data (simplified example: sends data as a simple string)
+                 const availableSlots = document.getElementById('profile-slots').value; 
+
+                 const updateData = { department, title, bio, availableSlots }; 
+                 
+                 try {
+                     await callApi('/profile/faculty', 'PUT', updateData);
+                     showModal('Success', 'Faculty profile updated successfully!');
+                 } catch (error) {
+                     showModal('Error', error.message || 'Failed to save profile.');
+                 } finally {
+                     saveBtn.disabled = false;
+                     saveBtn.textContent = 'Save Profile';
+                     // Re-render dashboard to show updated data
+                     showView('dashboard');
+                 }
+            };
+            window.saveFacultyProfile = saveProfile; // Expose to global scope for the form
+            
+            // NEW FUNCTION: Handles the INLINE submission of the approval form
+            window.submitApproval = async (bookingId, event, actionStatus) => {
+                event.preventDefault();
+                const form = document.getElementById(`schedule-form-${bookingId}`);
+                const finalDateTime = form.querySelector(`#final-date-${bookingId}`).value;
+                const roomNumber = form.querySelector(`#room-${bookingId}`).value;
+                const submitBtn = form.querySelector('button[type="submit"]');
+
+                if (!finalDateTime || !roomNumber) {
+                     showModal('Validation Error', 'Please provide a final date/time and a room number.');
+                     return;
+                }
+                
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Scheduling...';
+                
+                // Call the API with the collected data
+                try {
+                    await callApi(`/bookings/${bookingId}/status`, 'PUT', {
+                        status: actionStatus, // Will be 'approved' or 'reschedule'
+                        finalDateTime,
+                        roomNumber
+                    });
+                    showModal('Success', `Booking successfully scheduled and marked as ${actionStatus}. Student notified.`);
+                    showView('dashboard'); // Refresh
+                } catch (error) {
+                    showModal('Error', error.message || 'Failed to schedule booking.');
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = `Finalize ${actionStatus === 'approved' ? 'Approval' : 'Reschedule'}`;
+                }
+
+            };
+
+
+            appContainer.innerHTML = `
+                <h1 class="text-4xl font-extrabold text-college-dark mb-8 border-b-2 pb-2">
+                    Faculty Consultation Dashboard
+                </h1>
+                <div id="dashboard-content">
+                    <div class="text-center py-10 text-xl font-medium">Loading requests...</div>
+                </div>
+            `;
+            const contentDiv = document.getElementById('dashboard-content');
+
+            try {
+                // Fetch bookings (for dashboard view) and the faculty profile (for editing)
+                const bookings = await callApi('/bookings/my');
+                
+                // Fetch the faculty profile data for the editor
+                const profileResponse = await callApi(`/faculty/${user.facultyId}`);
+                const facultyProfile = profileResponse;
+                
+                if (!facultyProfile) {
+                    contentDiv.innerHTML = `<div class="p-6 bg-red-100 rounded-xl shadow border-l-4 border-red-500 text-red-700">Error: Faculty profile data is missing.</div>`;
+                    return;
+                }
+
+                
+                // --- PROFILE EDITING SECTION ---
+                const currentSlots = facultyProfile.availableSlots || 'Not specified (E.g. Mon, Wed 3-5 PM)'; 
+
+                let profileHtml = `
+                    <div class="mb-10 bg-white p-6 rounded-xl shadow-lg border-l-8 border-college-blue">
+                        <h2 class="text-3xl font-bold text-gray-700 mb-4 border-b pb-2">Your Profile & Availability</h2>
+                        <form id="profile-edit-form" onsubmit="window.saveFacultyProfile(event)">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="mb-4">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                                    <input type="text" id="profile-department" value="${facultyProfile.department || ''}" required class="w-full p-3 border border-gray-300 rounded-lg">
+                                </div>
+                                <div class="mb-4">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                                    <input type="text" id="profile-title" value="${facultyProfile.title || ''}" required class="w-full p-3 border border-gray-300 rounded-lg">
+                                </div>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Biography (Max 500 chars)</label>
+                                <textarea id="profile-bio" maxlength="500" class="w-full p-3 border border-gray-300 rounded-lg h-24">${facultyProfile.bio || ''}</textarea>
+                            </div>
+                            <div class="mb-6">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Available Slots (Simple Text Entry)</label>
+                                <input type="text" id="profile-slots" class="w-full p-3 border border-gray-300 rounded-lg" value="${currentSlots}" placeholder="E.g. Mon & Wed 3-5 PM, Fri 10-11 AM">
+                                <p class="text-xs text-gray-500 mt-1">Enter a simple text description of your availability.</p>
+                            </div>
+                            <button type="submit" id="save-profile-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
+                                Save Profile
+                            </button>
+                        </form>
+                    </div>
+                `;
+
+
+                // --- BOOKINGS PROCESSING SECTION ---
+                
+                const pendingBookings = bookings.filter(b => b.status === 'pending');
+                const otherBookings = bookings.filter(b => b.status !== 'pending');
+
+                let pendingHtml = pendingBookings.length > 0 ? pendingBookings.map(booking => `
+                    <div class="bg-white p-6 rounded-xl shadow-lg flex justify-between items-center border-l-8 border-yellow-500">
+                        <div>
+                            <p class="text-xl font-semibold text-gray-800 mb-1">Student: ${booking.student.name}</p>
+                            <p class="text-sm text-gray-600 mb-2">Email: ${booking.student.email}</p>
+                            <p class="text-sm text-gray-600">Dept: ${booking.student.studentDepartment || 'undefined'}, Batch: ${booking.student.batchNo || 'undefined'}</p>
+                            <p class="text-gray-700 mt-2">Topic: <span class="italic font-medium">${booking.topic}</span></p>
+                            ${booking.studentMessage ? `<p class="text-sm text-gray-500 mt-1">Msg: "${booking.studentMessage}"</p>` : ''}
+                            <div class="text-sm text-gray-500 space-y-1 mt-2">
+                                <p>📅 Student Preferred Date: ${new Date(booking.dateTime).toLocaleDateString()}</p>
+                                <p>🕒 Student Preferred Time: ${new Date(booking.dateTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                <p>⏱️ Duration: ${booking.durationMinutes} minutes</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Action Area -->
+                        <div class="flex flex-col space-y-3">
+                            <div class="flex space-x-3 self-end">
+                                <button 
+                                    onclick="window.handleFacultyAction('${booking._id}', 'approved')"
+                                    class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-150"
+                                >
+                                    Approve & Schedule
+                                </button>
+                                <button
+                                    onclick="window.handleFacultyAction('${booking._id}', 'rejected')"
+                                    class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-150"
+                                >
+                                    Reject
+                                </button>
+                            </div>
+
+                            <!-- INLINE SCHEDULING FORM (Initially hidden) -->
+                            <form id="schedule-form-${booking._id}" onsubmit="window.submitApproval('${booking._id}', event, 'approved')" class="mt-4 hidden bg-gray-100 p-4 rounded-lg shadow-inner w-full min-w-[300px]">
+                                <h4 class="font-semibold mb-2 text-college-dark">Final Schedule:</h4>
+                                <div class="space-y-2">
+                                    <input type="datetime-local" id="final-date-${booking._id}" required class="w-full p-2 border rounded text-sm" placeholder="Final Date/Time">
+                                    <input type="text" id="room-${booking._id}" required class="w-full p-2 border rounded text-sm" placeholder="Room Number / Location">
+                                </div>
+                                <button type="submit" class="w-full bg-green-700 hover:bg-green-800 text-white font-semibold py-2 mt-3 rounded-lg text-sm">
+                                    Finalize Approval
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                `).join('') : `
+                    <div class="p-6 bg-white rounded-xl shadow border-l-4 border-green-500 text-gray-500">No pending booking requests.</div>
+                `;
+
+                let otherHtml = otherBookings.map(booking => {
+                    let scheduleInfo = ``;
+                    let actionButtons = ``;
+
+                    if (booking.status === 'approved' || booking.status === 'reschedule') {
+                        // Display final schedule information if it exists
+                        if (booking.finalDateTime) {
+                             scheduleInfo = `
+                                 <p class="font-semibold text-sm mt-1 text-green-700">Scheduled:</p>
+                                 <p class="text-xs">📅 ${new Date(booking.finalDateTime).toLocaleDateString()}</p>
+                                 <p class="text-xs">🕒 ${new Date(booking.finalDateTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                 <p class="text-xs">📍 ${booking.roomNumber}</p>
+                             `;
+                        } else if (booking.status === 'reschedule') {
+                             scheduleInfo = `<p class="font-semibold text-sm mt-1 text-purple-700">Reschedule Requested:</p>`;
+                        }
+                       
+                         // Faculty can still Reschedule/Reject approved/rescheduled meetings
+                         actionButtons = `
+                            <div class="flex space-x-2 mt-2">
+                                <button
+                                    onclick="window.handleFacultyAction('${booking._id}', 'reschedule')"
+                                    class="bg-purple-500 hover:bg-purple-600 text-white font-semibold py-1 px-3 rounded-lg text-xs transition duration-150"
+                                >
+                                    Reschedule
+                                </button>
+                                <button
+                                    onclick="window.handleFacultyAction('${booking._id}', 'rejected')"
+                                    class="bg-red-500 hover:bg-red-600 text-white font-semibold py-1 px-3 rounded-lg text-xs transition duration-150"
+                                >
+                                    Reject
+                                </button>
+                            </div>
+                            <!-- INLINE SCHEDULING FORM for approved/rescheduled bookings (hidden by default) -->
+                            <form id="schedule-form-${booking._id}" onsubmit="window.submitApproval('${booking._id}', event, 'reschedule')" class="mt-4 hidden bg-gray-100 p-4 rounded-lg shadow-inner w-full min-w-[300px]">
+                                <h4 class="font-semibold mb-2 text-college-dark">Set New Schedule:</h4>
+                                <div class="space-y-2">
+                                    <input type="datetime-local" id="final-date-${booking._id}" value="${booking.finalDateTime ? booking.finalDateTime.substring(0, 16) : ''}" required class="w-full p-2 border rounded text-sm" placeholder="Final Date/Time">
+                                    <input type="text" id="room-${booking._id}" value="${booking.roomNumber || ''}" required class="w-full p-2 border rounded text-sm" placeholder="Room Number / Location">
+                                </div>
+                                <button type="submit" class="w-full bg-purple-700 hover:bg-purple-800 text-white font-semibold py-2 mt-3 rounded-lg text-sm">
+                                    Finalize Reschedule
+                                </button>
+                            </form>
+                         `;
+                    }
+                    
+                    return `
+                        <div class="bg-white p-6 rounded-xl shadow-lg flex justify-between items-center">
+                            <div>
+                                <p class="text-xl font-semibold text-gray-800 mb-1">Student: ${booking.student.name}</p>
+                                <p class="text-sm text-gray-600">Dept: ${booking.student.studentDepartment || 'undefined'}, Batch: ${booking.student.batchNo || 'undefined'}</p>
+                                <p class="text-gray-700 mt-2">Topic: <span class="italic font-medium">${booking.topic}</span></p>
+                                ${scheduleInfo}
+                            </div>
+                            <div class="flex flex-col items-end">
+                                <span class="${formatStatus(booking.status)}"></span>
+                                ${actionButtons}
+                            </div>
+                        </div>
+                    `;
+                }).join('') || `
+                    <div class="p-6 bg-white rounded-xl shadow border-l-4 border-gray-500 text-gray-500">No approved, rejected, or completed bookings.</div>
+                `;
+
+                // --- FIX: Define bookingsHtml to combine the content ---
+                let bookingsHtml = `
+                    <h2 class="text-3xl font-bold text-gray-700 mb-4">Pending Requests (${pendingBookings.length})</h2>
+                    <div class="space-y-4 mb-10">${pendingHtml}</div>
+
+                    <h2 class="text-3xl font-bold text-gray-700 mb-4">Upcoming & Past Consultations (${otherBookings.length})</h2>
+                    <div class="space-y-4">${otherHtml}</div>
+                `;
+                // --- END FIX ---
+
+
+                contentDiv.innerHTML = profileHtml + bookingsHtml; // <- This line now works!
+
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="text-center py-10 text-red-600 text-xl font-medium">${error.message}</div>`;
+            }
+        };
+        views.dashboard = renderFacultyDashboard;
+
+        const showView = (viewName, param = null) => {
+            // Default to landing page if user isn't authenticated, except on landing itself
+            if (!user && viewName !== 'landing') {
+                return showView('landing');
+            }
+            // Check for role-based access before rendering
+            if (user) {
+                if (viewName === 'bookings' && user.role !== 'student') viewName = 'faculty';
+                if (viewName === 'dashboard' && user.role !== 'faculty') viewName = 'faculty';
+                if (viewName === 'profile' && user.role !== 'student' && user.role !== 'faculty') viewName = 'faculty';
+            }
+            
+            const renderer = views[viewName] || views.landing;
+            renderer(param);
+            updateNavBar();
+        };
+
+        // --- Initialization ---
+        document.getElementById('home-link').onclick = (e) => {
+            e.preventDefault();
+            showView(user ? 'faculty' : 'landing');
+        };
+
+        // Initial load check
+        document.addEventListener('DOMContentLoaded', () => {
+            showView(user ? 'faculty' : 'landing');
+        });
+    </script>
+</body>
+</html>
