@@ -1,31 +1,27 @@
-// --- Email Notification Service using Nodemailer ---
-const nodemailer = require('nodemailer');
+// --- Email Notification Service using SendGrid (via HTTP API) ---
+const sgMail = require('@sendgrid/mail');
+const { SENDGRID_API_KEY, EMAIL_SENDER } = process.env;
 
-// Configure the transporter using explicit host and port 587 (STARTTLS) to avoid timeout issues on Render
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com', // Explicitly use Gmail's host
-    port: 587,             // CRITICAL FIX: Use the STARTTLS port 587
-    secure: false,         // Set to false for port 587 (uses STARTTLS implicitly)
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
-    tls: {
-        // Required on some hosts to handle certificate issues
-        rejectUnauthorized: false
-    }
-});
+// Set the SendGrid API Key (This uses HTTPS/Port 443, bypassing Render's SMTP blocks)
+// NOTE: This must be done before the service functions are called
+if (SENDGRID_API_KEY) {
+    sgMail.setApiKey(SENDGRID_API_KEY);
+} else {
+    console.error("CRITICAL ERROR: SENDGRID_API_KEY is not set. Emails will fail.");
+}
+
 
 // Sends notification when a new request is submitted (to FACULTY)
 const sendNewRequestNotification = async (facultyEmail, studentName, topic, details) => {
     
+    // Structure the student message content
     const messageHtml = details.studentMessage 
         ? `<p><strong>Student's Optional Message:</strong> ${details.studentMessage}</p>` 
         : `<p>No optional message was included with this request.</p>`;
 
     const mailOptions = {
-        from: process.env.EMAIL_USER,
         to: facultyEmail,
+        from: EMAIL_SENDER,
         subject: `[Consultation Portal] New Booking Request from ${studentName}`,
         html: `
             <p>Dear Faculty,</p>
@@ -46,10 +42,11 @@ const sendNewRequestNotification = async (facultyEmail, studentName, topic, deta
         `,
     };
     try {
-        await transporter.sendMail(mailOptions);
-        console.log(`Email sent to faculty: ${facultyEmail}`);
+        await sgMail.send(mailOptions);
+        console.log(`SendGrid Email sent to faculty: ${facultyEmail}`);
     } catch (error) {
-        console.error(`Error sending new request email to ${facultyEmail}:`, error);
+        // SendGrid API errors are logged here
+        console.error(`Error sending new request email via SendGrid:`, error.response?.body?.errors || error);
     }
 };
 
@@ -58,6 +55,7 @@ const sendStatusUpdateNotification = async (studentEmail, status, facultyName, d
     let subject;
     let body;
 
+    // Logic to determine email content based on status
     if (status === 'approved') {
         subject = `✅ Your Consultation with ${facultyName} is CONFIRMED`;
         body = `
@@ -66,7 +64,7 @@ const sendStatusUpdateNotification = async (studentEmail, status, facultyName, d
             <p><strong>--- Final Schedule Details ---</strong></p>
             <p><strong>Date/Time:</strong> ${new Date(details.finalDateTime).toLocaleString()}</p>
             <p><strong>Location/Room:</strong> ${details.roomNumber}</p>
-            <p>Please ensure you arrive on time. Thank yourself. Thank you.</p>
+            <p>Please ensure you arrive on time. Thank you.</p>
         `;
     } else if (status === 'rejected') {
         subject = `❌ Your Consultation with ${facultyName} was Rejected`;
@@ -93,17 +91,17 @@ const sendStatusUpdateNotification = async (studentEmail, status, facultyName, d
     }
 
     const mailOptions = {
-        from: process.env.EMAIL_USER,
         to: studentEmail,
+        from: EMAIL_SENDER,
         subject: subject,
         html: body,
     };
 
     try {
-        await transporter.sendMail(mailOptions);
-        console.log(`Email sent to student: ${studentEmail} regarding status change.`);
+        await sgMail.send(mailOptions);
+        console.log(`SendGrid Email sent to student: ${studentEmail} regarding status change.`);
     } catch (error) {
-        console.error(`Error sending status update email to ${studentEmail}:`, error);
+        console.error(`Error sending status update email via SendGrid:`, error.response?.body?.errors || error);
     }
 };
 
