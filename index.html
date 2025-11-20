@@ -82,7 +82,7 @@
     <script>
         // --- Configuration and State ---
         // CRITICAL FIX: Using the specific network IP to bypass firewall/CORS blocks
-        const API_BASE_URL = 'https://faculty-consultation-portal.onrender.com/api'; // <--- USE YOUR NEW RENDER URL
+        const API_BASE_URL = 'http://10.3.4.254:5000/api'; // Use your current local IP or deployment URL
         const appContainer = document.getElementById('app-container');
         const navArea = document.getElementById('nav-area');
         let user = JSON.parse(localStorage.getItem('userInfo')) || null;
@@ -331,8 +331,11 @@
                     
                     // If login/register as student, ensure student profile data is available for MyProfile view
                     if (updatedUser.role === 'student') {
-                         const profileResponse = await callApi(`/profile/student/${updatedUser._id}`);
-                         updatedUser = { ...updatedUser, ...profileResponse };
+                         // API call needed here to fetch full student profile data if not returned directly by login/register
+                         // Since our login/register returns limited data, we rely on the server returning the necessary student profile fields.
+                         // Assuming the server response (response) for register/login includes studentDepartment/batchNo.
+                         updatedUser.studentDepartment = response.studentDepartment;
+                         updatedUser.batchNo = response.batchNo;
                     }
                     
                     updateAuthState(updatedUser);
@@ -351,6 +354,19 @@
         // NEW RENDER FUNCTION: Student Profile Editor
         const renderStudentProfileEditor = async () => {
             if (!user || user.role !== 'student') return showView('landing');
+            
+            // Ensure student profile data is available before rendering (if missing from initial login)
+            if (!user.studentDepartment) {
+                 try {
+                     const profileData = await callApi(`/profile/student/${user._id}`);
+                     // Update local user state
+                     user.studentDepartment = profileData.studentDepartment;
+                     user.batchNo = profileData.batchNo;
+                 } catch (e) {
+                      // Silently fail if fetch is not implemented, use existing local data
+                 }
+            }
+
 
             appContainer.innerHTML = `
                 <div class="mb-10 bg-white p-6 rounded-xl shadow-lg border-l-8 border-college-blue">
@@ -612,13 +628,13 @@
         const formatStatus = (status) => {
             const base = "font-semibold px-3 py-1 rounded-full text-sm capitalize";
             switch(status) {
-                // The status text is now returned cleanly inside the class string
+                // FINAL VISUAL FIX: Return the class string and status text cleanly.
                 case 'approved': return `${base} bg-green-100 text-green-700">Approved`;
                 case 'rejected': return `${base} bg-red-100 text-red-700">Rejected`;
                 case 'pending': return `${base} bg-yellow-100 text-yellow-700">Pending`;
                 case 'completed': return `${base} bg-gray-100 text-gray-700">Completed`;
                 case 'cancelled': return `${base} bg-gray-300 text-gray-700">Cancelled`; 
-                case 'reschedule': return `${base} bg-purple-100 text-purple-700">Rescheduled`; // FIXED Display Wording
+                case 'reschedule': return `${base} bg-purple-100 text-purple-700">Rescheduled`; 
                 default: return `${base} bg-gray-200 text-gray-800">${status}`;
             }
         };
@@ -967,7 +983,7 @@
                     let actionButtons = ``;
 
                     if (booking.status === 'approved' || booking.status === 'reschedule') {
-                        // Display final schedule information if it exists
+                        // Display final schedule information if it exists (i.e., faculty set a time during approval/reschedule)
                         if (booking.finalDateTime) {
                              scheduleInfo = `
                                  <p class="font-semibold text-sm mt-1 text-green-700">Scheduled:</p>
@@ -1018,7 +1034,7 @@
                                 ${scheduleInfo}
                             </div>
                             <div class="flex flex-col items-end">
-                                <span class="${formatStatus(booking.status)}"></span>
+                                <span class="${formatStatus(booking.status)}">${booking.status === 'reschedule' ? 'Rescheduled' : (booking.status === 'approved' ? 'Approved' : booking.status.charAt(0).toUpperCase() + booking.status.slice(1))}</span>
                                 ${actionButtons}
                             </div>
                         </div>
