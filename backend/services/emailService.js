@@ -1,13 +1,17 @@
 // --- Email Notification Service using Nodemailer ---
 const nodemailer = require('nodemailer');
 
-// Configure the transporter using environment variables (EMAIL_USER/PASS/SERVICE)
+// Configure the transporter using explicit host and secure port 465 to avoid timeout issues
 const transporter = nodemailer.createTransport({
-    service: process.env.EMAIL_SERVICE,
+    host: 'smtp.gmail.com', // Explicitly use Gmail's host
+    port: 465,             // Explicitly use the secure SMTP port
+    secure: true,          // Use SSL/TLS
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
     },
+    // Optional: Add timeout settings, though host/port fix is usually sufficient
+    // timeout: 20000, 
 });
 
 // Sends notification when a new request is submitted (to FACULTY)
