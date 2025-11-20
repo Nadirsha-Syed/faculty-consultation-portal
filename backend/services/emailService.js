@@ -1,17 +1,19 @@
 // --- Email Notification Service using Nodemailer ---
 const nodemailer = require('nodemailer');
 
-// Configure the transporter using explicit host and secure port 465 to avoid timeout issues
+// Configure the transporter using explicit host and port 587 (STARTTLS) to avoid timeout issues on Render
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com', // Explicitly use Gmail's host
-    port: 465,             // Explicitly use the secure SMTP port
-    secure: true,          // Use SSL/TLS
+    port: 587,             // CRITICAL FIX: Use the STARTTLS port 587
+    secure: false,         // Set to false for port 587 (uses STARTTLS implicitly)
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
     },
-    // Optional: Add timeout settings, though host/port fix is usually sufficient
-    // timeout: 20000, 
+    tls: {
+        // Required on some hosts to handle certificate issues
+        rejectUnauthorized: false
+    }
 });
 
 // Sends notification when a new request is submitted (to FACULTY)
@@ -64,7 +66,7 @@ const sendStatusUpdateNotification = async (studentEmail, status, facultyName, d
             <p><strong>--- Final Schedule Details ---</strong></p>
             <p><strong>Date/Time:</strong> ${new Date(details.finalDateTime).toLocaleString()}</p>
             <p><strong>Location/Room:</strong> ${details.roomNumber}</p>
-            <p>Please ensure you arrive on time. Thank you.</p>
+            <p>Please ensure you arrive on time. Thank yourself. Thank you.</p>
         `;
     } else if (status === 'rejected') {
         subject = `❌ Your Consultation with ${facultyName} was Rejected`;
