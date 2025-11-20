@@ -329,11 +329,8 @@
                         token: response.token
                     };
                     
-                    // If login/register as student, ensure student profile data is available for MyProfile view
+                    // Assuming the server response includes studentDepartment/batchNo for student
                     if (updatedUser.role === 'student') {
-                         // API call needed here to fetch full student profile data if not returned directly by login/register
-                         // Since our login/register returns limited data, we rely on the server returning the necessary student profile fields.
-                         // Assuming the server response (response) for register/login includes studentDepartment/batchNo.
                          updatedUser.studentDepartment = response.studentDepartment;
                          updatedUser.batchNo = response.batchNo;
                     }
@@ -355,19 +352,6 @@
         const renderStudentProfileEditor = async () => {
             if (!user || user.role !== 'student') return showView('landing');
             
-            // Ensure student profile data is available before rendering (if missing from initial login)
-            if (!user.studentDepartment) {
-                 try {
-                     const profileData = await callApi(`/profile/student/${user._id}`);
-                     // Update local user state
-                     user.studentDepartment = profileData.studentDepartment;
-                     user.batchNo = profileData.batchNo;
-                 } catch (e) {
-                      // Silently fail if fetch is not implemented, use existing local data
-                 }
-            }
-
-
             appContainer.innerHTML = `
                 <div class="mb-10 bg-white p-6 rounded-xl shadow-lg border-l-8 border-college-blue">
                     <h1 class="text-4xl font-extrabold text-college-dark mb-8 border-b-2 pb-2">My Profile</h1>
@@ -628,16 +612,22 @@
         const formatStatus = (status) => {
             const base = "font-semibold px-3 py-1 rounded-full text-sm capitalize";
             switch(status) {
-                // FINAL VISUAL FIX: Return the class string and status text cleanly.
-                case 'approved': return `${base} bg-green-100 text-green-700">Approved`;
-                case 'rejected': return `${base} bg-red-100 text-red-700">Rejected`;
-                case 'pending': return `${base} bg-yellow-100 text-yellow-700">Pending`;
-                case 'completed': return `${base} bg-gray-100 text-gray-700">Completed`;
-                case 'cancelled': return `${base} bg-gray-300 text-gray-700">Cancelled`; 
-                case 'reschedule': return `${base} bg-purple-100 text-purple-700">Rescheduled`; 
-                default: return `${base} bg-gray-200 text-gray-800">${status}`;
+                // Final Fix: Return the status string cleanly
+                case 'approved': return `${base} bg-green-100 text-green-700`;
+                case 'rejected': return `${base} bg-red-100 text-red-700`;
+                case 'pending': return `${base} bg-yellow-100 text-yellow-700`;
+                case 'completed': return `${base} bg-gray-100 text-gray-700`;
+                case 'cancelled': return `${base} bg-gray-300 text-gray-700`; 
+                case 'reschedule': return `${base} bg-purple-100 text-purple-700`; 
+                default: return `${base} bg-gray-200 text-gray-800`;
             }
         };
+        
+        const displayStatusText = (status) => {
+            if (status === 'reschedule') return 'Rescheduled';
+            if (status === 'cancelled') return 'Cancelled';
+            return status.charAt(0).toUpperCase() + status.slice(1);
+        }
 
         const renderStudentBookings = async () => {
             if (!user) return showView('landing');
@@ -740,7 +730,9 @@
                                 </div>
                             </div>
                             <div class="flex flex-col items-end space-y-3">
-                                <span class="${formatStatus(booking.status)}"></span>
+                                <span class="${formatStatus(booking.status)}">
+                                    ${displayStatusText(booking.status)}
+                                </span>
                                 ${actionsHtml}
                             </div>
                         </div>
@@ -1034,7 +1026,9 @@
                                 ${scheduleInfo}
                             </div>
                             <div class="flex flex-col items-end">
-                                <span class="${formatStatus(booking.status)}">${booking.status === 'reschedule' ? 'Rescheduled' : (booking.status === 'approved' ? 'Approved' : booking.status.charAt(0).toUpperCase() + booking.status.slice(1))}</span>
+                                <span class="${formatStatus(booking.status)}">
+                                    ${displayStatusText(booking.status)}
+                                </span>
                                 ${actionButtons}
                             </div>
                         </div>
